@@ -27,7 +27,7 @@ export default function SignInPage() {
       if (result?.error) {
         setError('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
       } else {
-        router.push('/game');
+        router.push('/battle');
         router.refresh();
       }
     } catch (error) {
@@ -38,7 +38,7 @@ export default function SignInPage() {
   };
 
   const handleSocialLogin = (provider) => {
-    signIn(provider, { callbackUrl: '/game' });
+    signIn(provider, { callbackUrl: '/battle' });
   };
 
   return (
@@ -172,4 +172,3 @@ export default function SignInPage() {
     </div>
   );
 }
-

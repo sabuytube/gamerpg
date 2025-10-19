@@ -36,6 +36,11 @@ const CharacterSchema = new mongoose.Schema({
     type: Number,
     default: 20,
   },
+  statPoints: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
   stats: {
     STR: { type: Number, default: 0 },
     DEX: { type: Number, default: 0 },
@@ -44,23 +49,49 @@ const CharacterSchema = new mongoose.Schema({
     AGI: { type: Number, default: 0 },
     LUK: { type: Number, default: 0 },
   },
+  // Equipment should reference specific item instances owned by the character
   equipment: {
     weapon: {
-      type: mongoose.Schema.Types.Mixed,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ItemInstance',
       default: null,
     },
-    armor: {
-      type: mongoose.Schema.Types.Mixed,
+    head: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ItemInstance',
+      default: null,
+    },
+    body: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ItemInstance',
       default: null,
     },
     charm: {
-      type: mongoose.Schema.Types.Mixed,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ItemInstance',
+      default: null,
+    },
+    accessory: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ItemInstance',
+      default: null,
+    },
+    offhand: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ItemInstance',
       default: null,
     },
   },
+  // Inventory now stores references to ItemInstance documents (or a quantity for stackable items)
   inventory: {
-    type: [mongoose.Schema.Types.Mixed],
+    type: [{ item: { type: mongoose.Schema.Types.ObjectId, ref: 'ItemInstance' }, qty: { type: Number, default: 1 } }],
     default: [],
+  },
+  materials: {
+    ores: { type: [mongoose.Schema.Types.Mixed], default: [] }, // แร่
+    crystals: { type: [mongoose.Schema.Types.Mixed], default: [] }, // คริสตัล
+    essences: { type: [mongoose.Schema.Types.Mixed], default: [] }, // สาระ
+    scrolls: { type: [mongoose.Schema.Types.Mixed], default: [] }, // สูตร
   },
   dungeonProgress: {
     dungeonIndex: {
@@ -90,4 +121,3 @@ CharacterSchema.index({ userId: 1, isActive: 1 });
 CharacterSchema.index({ userId: 1, createdAt: -1 });
 
 export default mongoose.models.Character || mongoose.model('Character', CharacterSchema);
-

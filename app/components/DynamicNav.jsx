@@ -33,7 +33,6 @@ export default function DynamicNav() {
     { href: '/', label: 'Home', show: true },
     { href: '/character/create', label: 'Create Character', show: !hasCharacter && status === 'authenticated' },
     { href: '/character/profile', label: 'Profile', show: hasCharacter && status === 'authenticated' },
-    { href: '/game', label: 'Game', show: true },
     { href: '/map', label: 'Map', show: true },
     { href: '/stats', label: 'Systems', show: true },
   ];
@@ -54,4 +53,3 @@ export default function DynamicNav() {
     </>
   );
 }
-

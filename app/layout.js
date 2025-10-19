@@ -2,19 +2,12 @@ import Link from 'next/link';
 import './globals.css';
 import AuthProvider from '@/components/AuthProvider';
 import AuthButton from '@/components/AuthButton';
+import DynamicNav from '@/components/DynamicNav';
 
 export const metadata = {
   title: 'GameRPG',
   description: 'A modular RPG sandbox built with Next.js App Router and Tailwind CSS.',
 };
-
-const primaryNav = [
-  { href: '/', label: 'Home' },
-  { href: '/character/create', label: 'Create Character' },
-  { href: '/game', label: 'Game' },
-  { href: '/map', label: 'Map' },
-  { href: '/stats', label: 'Systems' },
-];
 
 export default function RootLayout({ children }) {
   return (
@@ -29,11 +22,7 @@ export default function RootLayout({ children }) {
                 </Link>
                 <div className="flex items-center gap-6">
                   <div className="flex items-center gap-3 text-slate-300">
-                    {primaryNav.map((link) => (
-                      <Link key={link.href} href={link.href} className="rounded-lg px-3 py-1.5 transition hover:bg-slate-800 hover:text-slate-100">
-                        {link.label}
-                      </Link>
-                    ))}
+                    <DynamicNav />
                   </div>
                   <AuthButton />
                 </div>

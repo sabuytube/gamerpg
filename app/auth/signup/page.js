@@ -68,7 +68,7 @@ export default function SignUpPage() {
       if (result?.error) {
         router.push('/auth/signin');
       } else {
-        router.push('/game');
+        router.push('/battle');
         router.refresh();
       }
     } catch (error) {
@@ -79,7 +79,7 @@ export default function SignUpPage() {
   };
 
   const handleSocialSignUp = (provider) => {
-    signIn(provider, { callbackUrl: '/game' });
+    signIn(provider, { callbackUrl: '/battle' });
   };
 
   return (
@@ -229,4 +229,3 @@ export default function SignUpPage() {
     </div>
   );
 }
-

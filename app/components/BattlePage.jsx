@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import BattleArena from '@/components/game/BattleArena';
 import { chance, clamp, irand } from '@/lib/game/math';
 import { computeGearModifiers, createEmptyEquipment } from '@/lib/game/gear';
@@ -9,6 +10,7 @@ import { createEntity, formatDamage, tryEvade } from '@/lib/game/entities';
 import { randomItem } from '@/lib/game/items';
 import { SKILLS } from '@/lib/game/skills';
 import { DUNGEONS, pickEnemyForRoom } from '@/lib/game/dungeon';
+import apiService from '@/lib/api';
 
 const LOCAL_STORAGE_KEY = 'mini6rpg_state_v2';
 const BATTLE_DATA_KEY = 'mini6rpg_battle_data';
@@ -24,6 +26,9 @@ const INITIAL_STATS = {
 
 export default function BattlePage() {
   const router = useRouter();
+  const { data: session, status } = useSession();
+  const [loading, setLoading] = useState(true);
+  const [character, setCharacter] = useState(null);
   const [baseStats, setBaseStats] = useState(() => ({ ...INITIAL_STATS }));
   const [player, setPlayer] = useState(null);
   const [enemy, setEnemy] = useState(null);
@@ -39,6 +44,7 @@ export default function BattlePage() {
   const [dungeonIndex, setDungeonIndex] = useState(0);
   const [roomIndex, setRoomIndex] = useState(0);
   const [battleSource, setBattleSource] = useState('dungeon'); // 'dungeon' or 'map'
+  const [statPoints, setStatPoints] = useState(0); // เพิ่ม state สำหรับ stat points
 
   const gearMods = useMemo(() => computeGearModifiers(equipment), [equipment]);
 
@@ -63,47 +69,110 @@ export default function BattlePage() {
     return { updated: { ...targetEntity, hp: remaining }, dealt: reduced };
   };
 
+  // โหลดข้อมูลตัวละครจาก database
+  const loadCharacterFromDB = async () => {
+    try {
+      setLoading(true);
+      const data = await apiService.get('character');
+
+      if (data && data.character) {
+        const char = data.character;
+        setCharacter(char);
+        setBaseStats(char.stats || INITIAL_STATS);
+        setLevel(char.level || 1);
+        setXp(char.exp || 0);
+        setXpToNext(char.expToNext || 20);
+        setStatPoints(char.statPoints || 0); // เพิ่มการโหลด statPoints
+
+        const emptyEquip = createEmptyEquipment();
+        setEquipment(char.equipment ? { ...emptyEquip, ...char.equipment } : emptyEquip);
+        setInventory(Array.isArray(char.inventory) ? char.inventory : []);
+        setDungeonIndex(char.dungeonProgress?.dungeonIndex || 0);
+        setRoomIndex(char.dungeonProgress?.roomIndex || 0);
+      }
+    } catch (err) {
+      console.error('Error loading character:', err);
+      router.push('/character/create');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // บันทึกข้อมูลลง database
+  const saveCharacterToDB = async (updates) => {
+    try {
+      await apiService.patch('character', updates);
+      console.log('Character saved to database');
+    } catch (err) {
+      console.error('Error saving character:', err);
+    }
+  };
+
   const grantXp = (amount) => {
+    let newXp = xp;
+    let newLevel = level;
+    let newNextCap = xpToNext;
+    let newStatPoints = statPoints;
+
     setXp((currentXp) => {
       let pool = currentXp + amount;
-      let newLevel = level;
-      let nextCap = xpToNext;
+      newXp = pool;
+      newLevel = level;
+      newNextCap = xpToNext;
 
-      while (pool >= nextCap) {
-        pool -= nextCap;
+      while (pool >= newNextCap) {
+        pool -= newNextCap;
         newLevel += 1;
-        levelUp(newLevel);
-        nextCap = Math.round(20 + newLevel * 10);
+        newStatPoints += 1; // เพิ่ม stat point
+        newNextCap = Math.round(20 + newLevel * 10);
+
+        // Heal HP/MP เต็ม
+        setPlayer((existing) => {
+          if (!existing) return existing;
+          return {
+            ...existing,
+            hp: existing.derived.maxHP,
+            mp: existing.derived.maxMP,
+          };
+        });
+
+        pushLog(`🎉 Level Up! -> Lv.${newLevel}`);
+        pushLog(`⭐ +1 Stat Point! (Visit Profile to allocate)`);
+        pushLog('💚 You feel refreshed (fully healed)!');
       }
 
       setLevel(newLevel);
-      setXpToNext(nextCap);
+      setXpToNext(newNextCap);
+      setStatPoints(newStatPoints);
+      newXp = pool;
 
       return pool;
     });
+
+    // Return values สำหรับใช้ใน endBattle
+    return { newXp, newLevel, newNextCap, newStatPoints };
   };
 
   const levelUp = (newLevel) => {
-    const stats = ['STR', 'DEX', 'INT', 'VIT', 'AGI', 'LUK'];
-    const first = stats[irand(0, stats.length - 1)];
-    const second = stats[irand(0, stats.length - 1)];
+    // เพิ่ม 1 Stat Point เมื่อ Level Up แทนการสุ่ม Stats
+    setStatPoints((prev) => prev + 1);
 
-    setBaseStats((current) => {
-      const next = { ...current, [first]: current[first] + 1, [second]: current[second] + 1 };
-
-      setPlayer((existing) => {
-        if (!existing) return existing;
-        return createEntity(existing.name, newLevel, next, gearMods);
-      });
-
-      return next;
+    // Heal HP/MP เต็ม
+    setPlayer((existing) => {
+      if (!existing) return existing;
+      return {
+        ...existing,
+        hp: existing.derived.maxHP,
+        mp: existing.derived.maxMP,
+      };
     });
 
-    pushLog(`Level Up!  ->  Lv.${newLevel} (+1 ${first}, +1 ${second})`);
-    pushLog('You feel refreshed (fully healed)!');
+    pushLog(`🎉 Level Up! -> Lv.${newLevel}`);
+    pushLog(`⭐ +1 Stat Point! (Visit Profile to allocate)`);
+    pushLog('💚 You feel refreshed (fully healed)!');
   };
 
-  const endBattle = (victory) => {
+  const endBattle = async (victory) => {
     setTurn('end');
     if (!player || !enemy) return;
 
@@ -112,13 +181,67 @@ export default function BattlePage() {
       pushLog(`You win! +${reward} XP`);
       grantXp(reward);
 
-      if (chance(0.8)) {
-        const loot = randomItem();
-        addLoot(loot);
-        pushLog(`Loot: ${loot.name} [${loot.rarity}]`);
-      } else {
-        pushLog('No loot this time.');
+      // ดรอปไอเทมจากมอนสเตอร์ตาม drop table
+      const droppedItems = [];
+
+      // ดึงรายการไอเทมจาก API โดยใช้ apiService
+      try {
+        const itemsData = await apiService.get('items');
+        const itemsPool = itemsData.items || [];
+
+        // ดึงข้อมูลมอนสเตอร์จาก localStorage (ที่มี dropTable)
+        if (typeof window !== 'undefined') {
+          const battleData = localStorage.getItem(BATTLE_DATA_KEY);
+          if (battleData) {
+            const { enemyData } = JSON.parse(battleData);
+
+            if (enemyData && enemyData.dropTable && Array.isArray(enemyData.dropTable)) {
+              // คำนวณ drop items
+              for (const dropEntry of enemyData.dropTable) {
+                const roll = Math.random();
+
+                if (roll <= dropEntry.dropChance) {
+                  // กรองไอเทมตาม type และ rarity
+                  const matchingItems = itemsPool.filter(
+                    item => item.type === dropEntry.itemType &&
+                            item.rarity === dropEntry.itemRarity
+                  );
+
+                  if (matchingItems.length > 0) {
+                    // สุ่มเลือกไอเทม
+                    const randomIndex = Math.floor(Math.random() * matchingItems.length);
+                    const selectedItem = matchingItems[randomIndex];
+
+                    droppedItems.push(selectedItem);
+
+                    // แสดง log พร้อม emoji rarity
+                    const rarityEmoji = {
+                      common: '⚪',
+                      rare: '🔵',
+                      epic: '🟣',
+                      legendary: '🟠'
+                    };
+                    const emoji = rarityEmoji[selectedItem.rarity] || '⚪';
+                    pushLog(`${emoji} Loot: ${selectedItem.name} [${selectedItem.rarity}]`);
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching items for drop:', error);
       }
+
+      // ถ้าไม่มีไอเทมดรอป
+      if (droppedItems.length === 0) {
+        pushLog('No loot this time.');
+      } else {
+        pushLog(`💰 Got ${droppedItems.length} item(s)!`);
+      }
+
+      // เพิ่มไอเทมลง inventory
+      droppedItems.forEach(item => addLoot(item));
 
       if (battleSource === 'dungeon') {
         const activeDungeon = DUNGEONS[dungeonIndex];
@@ -130,6 +253,41 @@ export default function BattlePage() {
           setRoomIndex(0);
         }
       }
+
+      // บันทึกผลการต่อสู้ลง database
+      setTimeout(async () => {
+        const updates = {
+          stats: baseStats,
+          level,
+          exp: xp + reward,
+          expToNext: xpToNext,
+          statPoints: statPoints,
+          equipment,
+          inventory: [...inventory, ...droppedItems],
+          dungeonProgress: {
+            dungeonIndex,
+            roomIndex: battleSource === 'dungeon'
+              ? (roomIndex < DUNGEONS[dungeonIndex].rooms.length - 1 ? roomIndex + 1 : 0)
+              : roomIndex,
+          },
+        };
+
+        await saveCharacterToDB(updates);
+
+        // Sync กับ localStorage
+        const payload = {
+          stats: baseStats,
+          level,
+          xp: xp + reward,
+          xpToNext,
+          equipment,
+          inventory: [...inventory, ...droppedItems],
+          dungeonIndex: updates.dungeonProgress.dungeonIndex,
+          roomIndex: updates.dungeonProgress.roomIndex,
+        };
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));
+      }, 500);
+
     } else {
       pushLog('You were defeated... Try changing gear or stats.');
     }
@@ -219,7 +377,6 @@ export default function BattlePage() {
   };
 
   const handleRetry = () => {
-    // Reload battle from saved data
     if (typeof window !== 'undefined') {
       const battleData = localStorage.getItem(BATTLE_DATA_KEY);
       if (battleData) {
@@ -230,8 +387,6 @@ export default function BattlePage() {
   };
 
   const handleExitBattle = () => {
-    // Save current state and return to previous page
-    saveGameState();
     if (battleSource === 'map') {
       router.push('/map');
     } else {
@@ -244,7 +399,7 @@ export default function BattlePage() {
 
     setBattleSource(source || 'dungeon');
 
-    const hero = createEntity('Hero', level, baseStats, gearMods);
+    const hero = createEntity(character?.name || 'Hero', level, baseStats, gearMods);
     let foe;
 
     if (enemyData) {
@@ -282,68 +437,36 @@ export default function BattlePage() {
     pushLog(locationText);
   };
 
-  const saveGameState = () => {
-    if (typeof window === 'undefined') return;
-
-    const payload = {
-      stats: baseStats,
-      level,
-      xp,
-      xpToNext,
-      equipment,
-      inventory,
-      dungeonIndex,
-      roomIndex,
-    };
-
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));
-  };
-
-  // Load game state on mount
+  // Load character data on mount
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-
-        setBaseStats(parsed.stats ? { ...INITIAL_STATS, ...parsed.stats } : { ...INITIAL_STATS });
-
-        const emptyEquip = createEmptyEquipment();
-        setEquipment(parsed.equipment ? { ...emptyEquip, ...parsed.equipment } : emptyEquip);
-
-        setInventory(Array.isArray(parsed.inventory) ? parsed.inventory : []);
-        setLevel(parsed.level ?? 1);
-        setXp(parsed.xp ?? 0);
-        setXpToNext(parsed.xpToNext ?? 20);
-        setDungeonIndex(parsed.dungeonIndex ?? 0);
-        setRoomIndex(parsed.roomIndex ?? 0);
-      } catch {
-        // ignore corrupted saves
-      }
+    if (status === 'unauthenticated') {
+      router.push('/auth/signin');
+      return;
     }
 
-    // Load battle data
-    const battleData = localStorage.getItem(BATTLE_DATA_KEY);
-    if (battleData) {
-      try {
-        const data = JSON.parse(battleData);
-        initializeBattle(data);
-      } catch {
-        // If no battle data, redirect back
+    if (status === 'authenticated') {
+      loadCharacterFromDB();
+    }
+  }, [status]);
+
+  // Initialize battle after character is loaded
+  useEffect(() => {
+    if (!character || loading) return;
+
+    if (typeof window !== 'undefined') {
+      const battleData = localStorage.getItem(BATTLE_DATA_KEY);
+      if (battleData) {
+        try {
+          const data = JSON.parse(battleData);
+          initializeBattle(data);
+        } catch {
+          router.push('/game');
+        }
+      } else {
         router.push('/game');
       }
-    } else {
-      // No battle data, redirect
-      router.push('/game');
     }
-  }, []);
-
-  // Save game state periodically
-  useEffect(() => {
-    saveGameState();
-  }, [baseStats, level, xp, xpToNext, equipment, inventory, dungeonIndex, roomIndex]);
+  }, [character, loading]);
 
   // Enemy AI
   useEffect(() => {
@@ -364,6 +487,34 @@ export default function BattlePage() {
 
     return () => clearTimeout(timeout);
   }, [turn, enemy, player]);
+
+  if (status === 'loading' || loading) {
+    return (
+      <div className="min-h-[100dvh] bg-gradient-to-br from-purple-900 via-indigo-900 to-blue-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin text-6xl mb-4">⚔️</div>
+          <p className="text-white text-xl">กำลังเตรียมการต่อสู้...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!character) {
+    return (
+      <div className="min-h-[100dvh] bg-gradient-to-br from-purple-900 via-indigo-900 to-blue-900 flex items-center justify-center p-4">
+        <div className="bg-white/10 backdrop-blur-md rounded-2xl p-8 border-2 border-white/20 max-w-md w-full text-center">
+          <div className="text-6xl mb-4">😢</div>
+          <h2 className="text-2xl font-bold text-white mb-4">ไม่พบข้อมูลตัวละคร</h2>
+          <button
+            onClick={() => router.push('/character/create')}
+            className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-bold py-3 px-8 rounded-xl transition-all duration-200"
+          >
+            สร้างตัวละคร
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const activeDungeon = DUNGEONS[dungeonIndex];
 
@@ -389,6 +540,7 @@ export default function BattlePage() {
           log={battleLog}
           onRetry={handleRetry}
           onExit={handleExitBattle}
+          equipment={equipment}
           meta={{
             level,
             xp,

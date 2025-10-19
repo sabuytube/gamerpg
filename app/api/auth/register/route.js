@@ -1,7 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { NextResponse } from 'next/server';
-import { connectDB } from '@/lib/mongodb';
-import User from '@/models/User';
+import { getData, insertData } from '@/lib/mongodb';
 
 export async function POST(request) {
   try {
@@ -14,11 +13,17 @@ export async function POST(request) {
       );
     }
 
-    await connectDB();
+    // ตรวจสอบว่า email ซ้ำหรือไม่
+    const existingResult = await getData('users', {
+      where: { email },
+      limit: 1,
+    });
 
-    const existingUser = await User.findOne({ email });
-
-    if (existingUser) {
+    if (
+      existingResult.status &&
+      existingResult.data &&
+      existingResult.data.length > 0
+    ) {
       return NextResponse.json(
         { error: 'User already exists' },
         { status: 400 }
@@ -27,19 +32,27 @@ export async function POST(request) {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const user = await User.create({
+    const userData = {
       name,
       email,
       password: hashedPassword,
       provider: 'credentials',
-    });
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result = await insertData('users', userData);
+
+    if (!result.status) {
+      throw new Error(result.message || 'Failed to create user');
+    }
 
     return NextResponse.json(
       {
         user: {
-          id: user._id.toString(),
-          name: user.name,
-          email: user.email,
+          id: result.insertedId.toString(),
+          name: userData.name,
+          email: userData.email,
         },
       },
       { status: 201 }

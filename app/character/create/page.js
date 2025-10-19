@@ -1,21 +1,53 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { CHARACTER_CLASSES } from '@/lib/game/classes';
+import apiService from '@/lib/api';
 
 export default function CharacterCreationPage() {
   const router = useRouter();
   const { data: session, status } = useSession();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [checkingCharacter, setCheckingCharacter] = useState(true);
+  const [hasCharacter, setHasCharacter] = useState(false);
+  const [existingCharacter, setExistingCharacter] = useState(null);
   const [error, setError] = useState(null);
   const [characterData, setCharacterData] = useState({
     name: '',
     class: null,
     customStats: null,
   });
+
+  // ตรวจสอบว่ามีตัวละครอยู่แล้วหรือไม่
+  useEffect(() => {
+    if (status === 'authenticated') {
+      checkExistingCharacter();
+    } else if (status === 'unauthenticated') {
+      setCheckingCharacter(false);
+    }
+  }, [status]);
+
+  const checkExistingCharacter = async () => {
+    try {
+      setCheckingCharacter(true);
+      const data = await apiService.get('character');
+
+      if (data && data.character) {
+        // มีตัวละครอยู่แล้ว แสดงหน้าแจ้งเตือน
+        setHasCharacter(true);
+        setExistingCharacter(data.character);
+      }
+    } catch (err) {
+      // ถ้า error 404 แปลว่ายังไม่มีตัวละคร ให้สร้างได้
+      console.log('No existing character found, can create new one');
+      setHasCharacter(false);
+    } finally {
+      setCheckingCharacter(false);
+    }
+  };
 
   const handleClassSelect = (classId) => {
     const selectedClass = CHARACTER_CLASSES.find(c => c.id === classId);
@@ -43,23 +75,11 @@ export default function CharacterCreationPage() {
     setError(null);
 
     try {
-      const response = await fetch('/api/character', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: characterData.name,
-          class: characterData.class,
-          stats: characterData.class.baseStats,
-        }),
+      const data = await apiService.post('character', {
+        name: characterData.name,
+        class: characterData.class,
+        stats: characterData.class.baseStats,
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'ไม่สามารถสร้างตัวละครได้');
-      }
 
       // บันทึกลง localStorage เพื่อใช้ในเกม (backward compatibility)
       localStorage.setItem('character_data', JSON.stringify({
@@ -88,7 +108,9 @@ export default function CharacterCreationPage() {
       router.push('/character/profile');
     } catch (err) {
       console.error('Error creating character:', err);
-      setError(err.message);
+      // แปลง error object เป็น string
+      const errorMessage = err?.error || err?.message || JSON.stringify(err) || 'ไม่สามารถสร้างตัวละครได้';
+      setError(typeof errorMessage === 'string' ? errorMessage : 'ไม่สามารถสร้างตัวละครได้');
     } finally {
       setLoading(false);
     }
@@ -103,12 +125,12 @@ export default function CharacterCreationPage() {
     return colors[color] || colors.blue;
   };
 
-  if (status === 'loading') {
+  if (status === 'loading' || checkingCharacter) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-indigo-900 to-blue-900 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin text-6xl mb-4">⚔️</div>
-          <p className="text-white text-xl">กำลังโหลด...</p>
+          <p className="text-white text-xl">กำลังตรวจสอบข้อมูล...</p>
         </div>
       </div>
     );
@@ -117,6 +139,62 @@ export default function CharacterCreationPage() {
   if (status === 'unauthenticated') {
     router.push('/auth/signin');
     return null;
+  }
+
+  // ถ้ามีตัวละครอยู่แล้ว แสดงหน้าแจ้งเตือน
+  if (hasCharacter && existingCharacter) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-indigo-900 to-blue-900 flex items-center justify-center p-4">
+        <div className="max-w-2xl w-full">
+          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-8 border-2 border-white/20 text-center">
+            <div className="text-8xl mb-6">{existingCharacter.class.icon}</div>
+            <h1 className="text-4xl font-bold text-white mb-4">คุณมีตัวละครอยู่แล้ว!</h1>
+
+            <div className="bg-black/30 rounded-xl p-6 mb-6">
+              <h2 className="text-3xl font-bold text-white mb-2">{existingCharacter.name}</h2>
+              <p className="text-xl text-gray-300 mb-4">{existingCharacter.class.name}</p>
+
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="bg-white/10 rounded-lg p-3">
+                  <p className="text-gray-400">เลเวล</p>
+                  <p className="text-2xl font-bold text-yellow-400">{existingCharacter.level}</p>
+                </div>
+                <div className="bg-white/10 rounded-lg p-3">
+                  <p className="text-gray-400">EXP</p>
+                  <p className="text-2xl font-bold text-blue-400">{existingCharacter.exp}</p>
+                </div>
+              </div>
+            </div>
+
+            <p className="text-gray-300 mb-6">
+              ไม่สามารถสร้างตัวละครใหม่ได้<br/>
+              แต่ละบัญชีสามารถมีตัวละครได้เพียง 1 ตัวเท่านั้น
+            </p>
+
+            <div className="flex gap-4 justify-center">
+              <button
+                onClick={() => router.push('/character/profile')}
+                className="bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-bold py-4 px-8 rounded-xl transition-all duration-200 shadow-lg"
+              >
+                👤 ดูโปรไฟล์ตัวละคร
+              </button>
+              <button
+                onClick={() => router.push('/game')}
+                className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold py-4 px-8 rounded-xl transition-all duration-200 shadow-lg"
+              >
+                🎮 เล่นเกม
+              </button>
+              <button
+                onClick={() => router.push('/')}
+                className="bg-gradient-to-r from-gray-500 to-gray-600 hover:from-gray-600 hover:to-gray-700 text-white font-bold py-4 px-8 rounded-xl transition-all duration-200 shadow-lg"
+              >
+                🏠 กลับหน้าหลัก
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

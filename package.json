@@ -6,13 +6,19 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "lint": "next lint"
+    "lint": "next lint",
+    "seed": "node scripts/seedMonsters.js",
+    "seed:items": "node scripts/seedItems.js",
+    "seed:all": "node scripts/seedMonsters.js && node scripts/seedItems.js"
   },
   "dependencies": {
+    "axios": "^1.12.2",
     "bcryptjs": "^3.0.2",
+    "crypto-js": "^4.2.0",
     "mongoose": "^8.19.1",
     "next": "14.2.7",
     "next-auth": "^4.24.11",
+    "phaser": "^3.90.0",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
